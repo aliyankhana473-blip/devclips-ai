@@ -102,15 +102,20 @@ export async function resolveYouTubeVideo(url: string): Promise<File> {
     body: JSON.stringify({ url }),
   });
 
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+  const payload = (await response.json().catch(() => null)) as { videoUrl?: string; title?: string; error?: string } | null;
+  if (!response.ok || !payload?.videoUrl) {
     throw new ApiError(
       payload?.error ?? `We couldn't process this YouTube link (${response.status}).`,
       response.status,
     );
   }
 
-  const blob = await response.blob();
-  const filename = response.headers.get('content-disposition')?.match(/filename="(.+?)"/)?.[1] ?? 'youtube-video.mp4';
-  return new File([blob], filename, { type: 'video/mp4' });
+  const videoResponse = await fetch(payload.videoUrl);
+  if (!videoResponse.ok) {
+    throw new ApiError('YouTube is busy, try again in 1 min or use Upload MP4.', 502);
+  }
+
+  const blob = await videoResponse.blob();
+  const safeName = (payload.title ?? 'youtube-video').replace(/[^a-zA-Z0-9-_]/g, '_').slice(0, 80);
+  return new File([blob], `${safeName}.mp4`, { type: 'video/mp4' });
 }
