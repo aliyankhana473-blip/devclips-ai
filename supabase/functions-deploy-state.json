@@ -1,9 +1,13 @@
 {
-  "projectId": "72613082",
+  "projectId": "72645824",
   "functions": {
     "admin": {
       "hasChanged": false,
       "hash": "674c8c8ef13b851303f99751415b846726952b4d3b32826adf78229b97aabb37"
+    },
+    "resolve-video": {
+      "hasChanged": false,
+      "hash": "60ca11e55ea4d8f516f6090942d345e46d36d8dc047b3448c9942b2795a7455b"
     },
     "save-clips": {
       "hasChanged": false,
@@ -12,10 +16,6 @@
     "submit-payment": {
       "hasChanged": false,
       "hash": "00a26a5b7b9db897b8943b10fe50ee8fc9dd001e5b526778b286534736ab7712"
-    },
-    "resolve-video": {
-      "hasChanged": false,
-      "hash": "51c39007ca86a97599cfb133bf8f46392e7f63e811b76bb8debb34315b4f9f25"
     }
   }
 }

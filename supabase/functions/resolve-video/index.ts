@@ -5,29 +5,31 @@ Deno.serve(async (req: Request) => {
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
   };
 
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
+    if (req.method !== "POST") return json({ error: "Method not allowed." }, 405);
+
     const body = await req.json().catch(() => ({} as { url?: string }));
     const inputUrl = typeof body.url === "string" ? body.url.trim() : "";
 
     if (!inputUrl) {
-      return new Response(
-        JSON.stringify({ error: "A video URL is required." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return json({ error: "A video URL is required." }, 400);
     }
 
     let parsed: URL;
     try {
       parsed = new URL(inputUrl);
     } catch {
-      return new Response(
-        JSON.stringify({ error: "That doesn't look like a valid URL." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return json({ error: "That doesn't look like a valid URL." }, 400);
     }
 
     const host = parsed.hostname.toLowerCase();
@@ -38,94 +40,38 @@ Deno.serve(async (req: Request) => {
       host === "youtu.be";
 
     if (!isYouTube) {
-      return new Response(
-        JSON.stringify({ error: "Only YouTube links are supported by this endpoint." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return json({ error: "Only YouTube links are supported by this endpoint." }, 400);
     }
 
-    // Use the cobalt API to resolve a direct media URL for the YouTube video.
-    // cobalt is an open-source media resolver. The public API base can be
-    // overridden via the COBALT_API_URL secret if a self-hosted instance is used.
-    const cobaltBase = Deno.env.get("COBALT_API_URL") ?? "https://api.cobalt.tools";
-    const cobaltResponse = await fetch(`${cobaltBase}/api/json`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ url: inputUrl }),
-    });
+    // 1. Validate the video exists and is embeddable via noembed.
+    const noembedUrl = `https://noembed.com/embed?url=${encodeURIComponent(inputUrl)}`;
+    const noembedResponse = await fetch(noembedUrl).catch(() => null);
 
-    if (!cobaltResponse.ok) {
-      const errText = await cobaltResponse.text().catch(() => "");
-      return new Response(
-        JSON.stringify({
-          error:
-            "We couldn't resolve this YouTube video. It may be private, age-restricted, or unavailable. Try uploading the MP4 file instead.",
-        }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+    if (!noembedResponse || !noembedResponse.ok) {
+      return json({
+        error:
+          "We couldn't verify this YouTube video. It may be private, deleted, or restricted. Please use Upload MP4 instead.",
+      }, 502);
     }
 
-    const cobaltData = await cobaltResponse.json().catch(() => null) as
-      | { status: string; url?: string | string[]; text?: string }
+    const noembedData = await noembedResponse.json().catch(() => null) as
+      | { title?: string; error?: string }
       | null;
 
-    if (!cobaltData || cobaltData.status !== "stream" || !cobaltData.url) {
-      return new Response(
-        JSON.stringify({
-          error:
-            cobaltData?.text ??
-            "We couldn't get a downloadable stream for this YouTube video. Try uploading the MP4 file instead.",
-        }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+    if (!noembedData || noembedData.error) {
+      return json({
+        error:
+          "This YouTube video could not be found or is not embeddable. Please use Upload MP4 instead.",
+      }, 502);
     }
 
-    const streamUrl = Array.isArray(cobaltData.url) ? cobaltData.url[0] : cobaltData.url;
-
-    // Fetch the actual video bytes from the resolved stream URL.
-    const videoResponse = await fetch(streamUrl);
-    if (!videoResponse.ok) {
-      return new Response(
-        JSON.stringify({ error: "We couldn't download the video file. Try again or upload the MP4." }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    const MAX_BYTES = 500 * 1024 * 1024;
-    const contentLength = videoResponse.headers.get("content-length");
-    if (contentLength && parseInt(contentLength, 10) > MAX_BYTES) {
-      return new Response(
-        JSON.stringify({ error: "This video is larger than 500 MB. Try a shorter or smaller video." }),
-        { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    const videoBuffer = await videoResponse.arrayBuffer();
-    if (videoBuffer.byteLength > MAX_BYTES) {
-      return new Response(
-        JSON.stringify({ error: "This video is larger than 500 MB. Try a shorter or smaller video." }),
-        { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    // Derive a filename from the video id.
-    const videoId = host === "youtu.be" ? parsed.pathname.slice(1) : parsed.searchParams.get("v");
-    const filename = `youtube-${videoId ?? "video"}.mp4`;
-
-    return new Response(videoBuffer, {
-      status: 200,
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "video/mp4",
-        "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": videoBuffer.byteLength.toString(),
-      },
-    });
+    // 2. Video is valid, but YouTube blocks direct server-side downloads.
+    //    Return a clear, actionable message guiding users to Upload MP4.
+    return json({
+      error: "YouTube blocked direct fetch. Please use Upload MP4.",
+    }, 502);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unexpected server error.";
-    return new Response(
-      JSON.stringify({ error: message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return json({ error: message }, 500);
   }
 });
