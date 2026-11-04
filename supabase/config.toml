@@ -1,0 +1,11 @@
+[functions.submit-payment]
+verify_jwt = false
+
+[functions.save-clips]
+verify_jwt = false
+
+[functions.admin]
+verify_jwt = false
+
+[functions.resolve-video]
+verify_jwt = false

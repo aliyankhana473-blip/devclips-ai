@@ -1,0 +1,21 @@
+{
+  "projectId": "72613082",
+  "functions": {
+    "admin": {
+      "hasChanged": false,
+      "hash": "674c8c8ef13b851303f99751415b846726952b4d3b32826adf78229b97aabb37"
+    },
+    "save-clips": {
+      "hasChanged": false,
+      "hash": "e1b68fd683da5077439899e62b4166ab0056758e48bf6ed2caae9ac945d3f5dc"
+    },
+    "submit-payment": {
+      "hasChanged": false,
+      "hash": "00a26a5b7b9db897b8943b10fe50ee8fc9dd001e5b526778b286534736ab7712"
+    },
+    "resolve-video": {
+      "hasChanged": false,
+      "hash": "51c39007ca86a97599cfb133bf8f46392e7f63e811b76bb8debb34315b4f9f25"
+    }
+  }
+}
