@@ -11,6 +11,8 @@ Deno.serve(async (req: Request) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
+  const BUSY_MSG = "YouTube is busy, try again in 1 min or use Upload MP4.";
+
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
@@ -41,39 +43,58 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Only YouTube links are supported by this endpoint." }, 400);
     }
 
-    // Call Cobalt API to resolve a direct stream URL for the YouTube video.
-    const cobaltResponse = await fetch("https://api.cobalt.tools/api/json", {
-      method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ url: inputUrl, downloadMode: "auto", videoQuality: "720" }),
-    }).catch(() => null);
+    const videoId = host === "youtu.be" ? parsed.pathname.slice(1) : parsed.searchParams.get("v");
+    const cobaltBody = JSON.stringify({ url: inputUrl, downloadMode: "auto", videoQuality: "720" });
+    const cobaltHeaders = { Accept: "application/json", "Content-Type": "application/json" };
 
-    if (!cobaltResponse) {
-      return json({ error: "YouTube is busy, try again in 1 min or use Upload MP4." }, 502);
+    const COBALT_INSTANCES = [
+      "https://api.cobalt.tools/api/json",
+      "https://co.wuk.sh/api/json",
+      "https://cobalt-api.kwiatekmiki.com/api/json",
+    ];
+
+    for (const apiUrl of COBALT_INSTANCES) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: cobaltHeaders,
+        body: cobaltBody,
+        signal: controller.signal,
+      }).catch(() => null);
+      clearTimeout(timeout);
+      if (!res || !res.ok) continue;
+
+      const data = await res.json().catch(() => null) as
+        | { status: string; url?: string | string[]; text?: string; title?: string }
+        | null;
+      if (!data || data.status === "error" || data.status === "rate-limit") continue;
+
+      if ((data.status === "stream" || data.status === "redirect") && data.url) {
+        const streamUrl = Array.isArray(data.url) ? data.url[0] : data.url;
+        return json({ videoUrl: streamUrl, title: data.title ?? `youtube-${videoId ?? "video"}` });
+      }
     }
 
-    const cobaltData = await cobaltResponse.json().catch(() => null) as
-      | { status: string; url?: string | string[]; text?: string; title?: string }
-      | null;
+    // Fallback: Invidious API
+    if (videoId) {
+      const invidiousRes = await fetch(
+        `https://invidious.io/api/v1/videos/${videoId}`,
+        { signal: AbortSignal.timeout(8000) },
+      ).catch(() => null);
 
-    if (!cobaltData) {
-      return json({ error: "YouTube is busy, try again in 1 min or use Upload MP4." }, 502);
+      if (invidiousRes && invidiousRes.ok) {
+        const invidiousData = await invidiousRes.json().catch(() => null) as
+          | { title?: string; adaptiveFormats?: { url?: string }[] }
+          | null;
+        const fallbackUrl = invidiousData?.adaptiveFormats?.find((f) => f.url)?.url;
+        if (fallbackUrl) {
+          return json({ videoUrl: fallbackUrl, title: invidiousData?.title ?? `youtube-${videoId}` });
+        }
+      }
     }
 
-    if (cobaltData.status === "error" || cobaltData.status === "rate-limit") {
-      return json({ error: "YouTube is busy, try again in 1 min or use Upload MP4." }, 502);
-    }
-
-    if ((cobaltData.status === "stream" || cobaltData.status === "redirect") && cobaltData.url) {
-      const streamUrl = Array.isArray(cobaltData.url) ? cobaltData.url[0] : cobaltData.url;
-      const videoId = host === "youtu.be" ? parsed.pathname.slice(1) : parsed.searchParams.get("v");
-      return json({
-        videoUrl: streamUrl,
-        title: cobaltData.title ?? `youtube-${videoId ?? "video"}`,
-      });
-    }
-
-    return json({ error: "YouTube is busy, try again in 1 min or use Upload MP4." }, 502);
+    return json({ error: BUSY_MSG }, 502);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unexpected server error.";
     return json({ error: message }, 500);
